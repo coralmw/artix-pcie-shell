@@ -13,7 +13,7 @@ csr.csv:
 # this can be built wherever
 .PHONY: design-flash
 design-flash:
-	python acorn_cle_215.py --uart-name=crossover --with-pcie --flash --output-dir build
+	python acorn_cle_215.py --uart-name=crossover --with-pcie --build --flash --driver --csr-csv "csr.csv" --output-dir build 
 	make driver
 	cd build/driver/user && make all
 	sudo chmod 777 /sys/bus/pci/devices/0000:03:00.0/*
