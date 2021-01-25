@@ -48,6 +48,7 @@ from litepcie.phy.s7pciephy import S7PCIEPHY
 from litepcie.software import generate_litepcie_software
 
 import subprocess as sp
+import pathlib
 
 from adder import CustomAdder
 
@@ -55,7 +56,7 @@ def git_ident():
     git_log_cmd = ["git", "--no-pager", "log", "--abbrev-commit", "--max-count", "1", "--pretty=reference"]
     git_status = sp.run(git_log_cmd, check=True, text=True).stdout
     return git_status
-    
+
 # BaseSoC -----------------------------------------------------------------------------------------
 class CRG(Module):
     def __init__(self, platform, sys_clk_freq):
@@ -161,11 +162,11 @@ class BaseSoC(SoCCore):
             pads         = platform.request_all("user_led"),
             sys_clk_freq = sys_clk_freq)
         self.add_csr("leds")
-        
+
         # XADC
         self.submodules.xadc = XADC()
         self.add_csr("xadc")
-        
+
         self.submodules.cadd = CustomAdder()
         self.add_csr("cadd")
 
@@ -193,13 +194,19 @@ def main():
         with_sata    = args.with_sata,
         **soc_sdram_argdict(args)
     )
+    basepath = pathlib.Path(__file__).parent.absolute()
+    # soc.platform.verilog_include_paths += [f"{basepath}/build/"]
+    # filename, language, library in 
+    soc.platform.sources.append( (f"{basepath}/build/mkBsAdder.v", "verilog", None) )
+    # print(soc.platform.verilog_include_paths)
+    # sys.exit()
     # import code; from pprint import pprint as p; code.InteractiveConsole(locals=dict(globals(), **locals())).interact()
     if args.with_spi_sdcard:
         soc.add_spi_sdcard()
 
     builder  = Builder(soc, **builder_argdict(args))
     builder.build(run=args.build)
-    
+
 
 
     if args.driver:

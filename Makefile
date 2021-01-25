@@ -5,7 +5,11 @@ setup-shell:
 	@echo "export PATH=\$$PATH:`pwd`/upstream/riscv64-unknown-elf-gcc-8.3.0-2019.08.0-x86_64-linux-ubuntu14/bin"
 	@echo "export PATH=\$$PATH:~/upstream/bsc/inst/bin"
 
-design: upstream/litex-boards/litex_boards/targets/acorn_cle_215.py
+build/mkBsAdder.v: BsAdder.bsv
+	bsc -verilog -u -g mkBsAdder -vdir build $<
+
+
+design: upstream/litex-boards/litex_boards/targets/acorn_cle_215.py build/mkBsAdder.v
 	python acorn_cle_215.py --uart-name=crossover --with-pcie --build --driver --csr-csv "csr.cv" --output-dir build
 
 csr.csv:
@@ -14,7 +18,7 @@ csr.csv:
 # this can be built wherever
 .PHONY: design-flash
 design-flash:
-	python acorn_cle_215.py --uart-name=crossover --with-pcie --build --flash --driver --csr-csv "csr.csv" --output-dir build 
+	python acorn_cle_215.py --uart-name=crossover --with-pcie --build --flash --driver --csr-csv "csr.csv" --output-dir build
 	make driver
 	cd build/driver/user && make all
 	sudo chmod 777 /sys/bus/pci/devices/0000:03:00.0/*
@@ -42,5 +46,4 @@ test-driver:
 	sudo ./litepcie_util info
 	sudo ./litepcie_util scratch_test
 	sudo ./litepcie_util dma_test
-	sudo ./litepcie_util uart_test	
-
+	sudo ./litepcie_util uart_test
