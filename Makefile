@@ -3,6 +3,7 @@ setup-shell:
 	@echo "source /tools/Xilinx/Vivado/2018.3/settings64.sh &&"
 	@echo "source venv/bin/activate &&"
 	@echo "export PATH=\$$PATH:`pwd`/upstream/riscv64-unknown-elf-gcc-8.3.0-2019.08.0-x86_64-linux-ubuntu14/bin"
+	@echo "export PATH=\$$PATH:~/upstream/bsc/inst/bin"
 
 design: upstream/litex-boards/litex_boards/targets/acorn_cle_215.py
 	python acorn_cle_215.py --uart-name=crossover --with-pcie --build --driver --csr-csv "csr.cv" --output-dir build
