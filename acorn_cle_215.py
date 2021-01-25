@@ -49,6 +49,8 @@ from litepcie.software import generate_litepcie_software
 
 import subprocess as sp
 
+from adder import CustomAdder
+
 def git_ident():
     git_log_cmd = ["git", "--no-pager", "log", "--abbrev-commit", "--max-count", "1", "--pretty=reference"]
     git_status = sp.run(git_log_cmd, check=True, text=True).stdout
@@ -163,6 +165,9 @@ class BaseSoC(SoCCore):
         # XADC
         self.submodules.xadc = XADC()
         self.add_csr("xadc")
+        
+        self.submodules.cadd = CustomAdder()
+        self.add_csr("cadd")
 
 
 # Build --------------------------------------------------------------------------------------------
