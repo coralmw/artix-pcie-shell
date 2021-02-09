@@ -51,6 +51,7 @@ import subprocess as sp
 import pathlib
 
 from adder import CustomAdder
+from bsREPL import bsREPL
 
 def git_ident():
     git_log_cmd = ["git", "--no-pager", "log", "--abbrev-commit", "--max-count", "1", "--pretty=reference"]
@@ -86,7 +87,7 @@ class BaseSoC(SoCCore):
     def __init__(self, sys_clk_freq=int(100e6), with_pcie=False, with_sata=False, **kwargs):
         platform = acorn_cle_215_platform.Platform()
 
-        # SoCCore ----------------------------------------------------------------------------------
+        # # SoCCore ----------------------------------------------------------------------------------
         SoCCore.__init__(self, platform, sys_clk_freq,
             ident          = f"LiteX SoC on Acorn CLE 215+ - git log {git_ident()}",
             ident_version  = True,
@@ -167,9 +168,11 @@ class BaseSoC(SoCCore):
         self.submodules.xadc = XADC()
         self.add_csr("xadc")
 
-        self.submodules.cadd = CustomAdder()
-        self.add_csr("cadd")
+        # self.submodules.cadd = CustomAdder()
+        # self.add_csr("cadd")
 
+        self.submodules.bsREPL = bsREPL()
+        self.add_csr("bsREPL")
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -195,9 +198,14 @@ def main():
         **soc_sdram_argdict(args)
     )
     basepath = pathlib.Path(__file__).parent.absolute()
-    # soc.platform.verilog_include_paths += [f"{basepath}/build/"]
-    # filename, language, library in 
-    soc.platform.sources.append( (f"{basepath}/build/mkBsAdder.v", "verilog", None) )
+    soc.platform.verilog_include_paths += [f"/home/tparks/upstream/bsc/src/Verilog"]
+    # filename, language, library in
+    soc.platform.sources.append( (f"{basepath}/build/mkCollatzServer.v", "verilog", None) )
+    directory = '/home/tparks/upstream/bsc/src/Verilog'
+    for entry in os.scandir(directory):
+        if entry.path.endswith(".v") and entry.is_file():
+            soc.platform.sources.append( (entry.path, "verilog", None) )
+
     # print(soc.platform.verilog_include_paths)
     # sys.exit()
     # import code; from pprint import pprint as p; code.InteractiveConsole(locals=dict(globals(), **locals())).interact()
