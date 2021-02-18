@@ -1,18 +1,36 @@
 from migen import *
 from litex.soc.interconnect.csr import *
 from migen.fhdl import *
+from bsv_parser import BSVInterface
+from functools import partial
 
 class bsREPL(Module):
-    def __init__(self):
 
+    def __init__(self, comm=None):
+        self._comm = comm
+        INTERFACE = """
+        interface Ifc_type;
+          method Action collatz_submit(Int#(64) n);
+          method ActionValue#(Int#(64)) collatz_get();
+        endinterface: Ifc_type
+        """
+
+        self.interface = BSVInterface(INTERFACE)
+
+        if comm is None:
+            self._init_HDL()
+        else:
+            self._init_REPL()
+
+    def _init_HDL(self):
         # we need a parse of BsTop's type; so we can interface with it.
         # currently we hardcode the collatz interface.
         # currently only support single-arg inputs...!
-        actionmethods = [("Int", 64, "n", "collatz_submit")]
-        actionvaluemethods = [("Int", 64, "collatz_get")]
+        # actionmethods = [("Int", 64, "n", "collatz_submit")]
+        # actionvaluemethods = [("Int", 64, "collatz_get")]
         self.signals = signals = {}
 
-        self.reset = reset = CSRStorage(1, description=f"reset DUT on write", write_from_dev=True)
+        self.reset = reset = CSRStorage(1, description="reset DUT on write", write_from_dev=True)
         self.csrs = csrs = {"reset": self.reset}
 
         rst_n = Signal()
@@ -32,15 +50,15 @@ class bsREPL(Module):
 
         self.signals = connections = []
 
-        for type, width, arg_name, method_name, in actionmethods:
+        for type, width, arg_name, method_name, in self.interface.actionmethods:
             # generate CSRs to interface. inputs call action methods.
             # ready, enable, ack. When calling a method, we wait for ready
             # set value, and pulse enable before returning.
             value = CSRStorage(width,
-                               description=f"input {method_name} value CSR",
-                               name=f"{method_name}_value_csr",
+                               description=f"input {method_name} {arg_name} value CSR",
+                               name=f"{method_name}_{arg_name}_value_csr",
                                write_from_dev=True)
-            csrs[f"{method_name}_value_csr"] = value
+            csrs[f"{method_name}_{arg_name}_value_csr"] = value
 
             # set to 0 by dev: waiting,
             # set to 1 by host: attempt write,
@@ -94,8 +112,7 @@ class bsREPL(Module):
                             Instance.Input(f"EN_{method_name}", enable_edge),
                             Instance.Output(f"RDY_{method_name}", ready_to_write)]
 
-
-        for type, width, method_name in actionvaluemethods:
+        for type, width, method_name in self.interface.actionvaluemethods:
             # actionvalue methods are a way of statefully returning a value
             # from a module. They have vale, EN, and RDY signals.
             # The module will hold RDY high if the methods can be called.
@@ -153,6 +170,7 @@ class bsREPL(Module):
                             Instance.Input(f"EN_{method_name}", enable_sig),
                             Instance.Output(f"RDY_{method_name}", ready_sig)]
 
+        # Add the user module
         self.specials += Instance("mkCollatzServer",
                                   Instance.Input("CLK", ClockSignal()),
                                   Instance.Input("RST_N", rst_n),
@@ -162,53 +180,65 @@ class bsREPL(Module):
             print(name, csr)
             self.__setattr__(name, csr)
 
-    def get_csrs(self):
-        return list(self.csrs.values())
+    def _init_REPL(self):
+        for type, width, arg_name, method_name, in self.interface.actionmethods:
+            fn = partial(self._action_call, modname="bsREPL", methodname=method_name)
+            self.__setattr__(method_name, fn)
 
+        for type, width, method_name in self.interface.actionvaluemethods:
+            fn = partial(self._action_value_return, modname="bsREPL", methodname=method_name)
+            self.__setattr__(method_name, fn)
 
-class bsREPLinterface():
-    """TODO: autogenerate this class.
-    """
+    def _action_call(self, modname, methodname, **kwargs):
+        module = self._comm.regs
+        trigger = getattr(module, f"{modname}_{methodname}_trigger_csr")
 
-    def __init__(self, dev):
-        self._dev = dev
+        # get each register for the called args
+        value_regs = {k : getattr(module, f"{modname}_{methodname}_{k}_value_csr")
+                      for k in kwargs.keys()}
 
-    def collatz_submit(self, val):
-        dev = self._dev
-        while dev.bsREPL_collatz_submit_trigger_csr != 0:
+        while trigger.read() != 0:
             # make sure any prior submission is accepted
             pass
-        dev.bsREPL_collatz_submit_value_csr = val
-        dev.bsREPL_collatz_submit_trigger_csr = 1
-        while dev.bsREPL_collatz_submit_trigger_csr == 1:
+
+        for k, v in kwargs.items():
+            value_regs[k].write(v)
+        trigger.write(1)
+
+        while trigger.read() == 1:
             # wait for ack
             pass
 
-    def collatz_get(self):
-        dev = self._dev
-        while dev.bsREPL_collatz_get_ack_csr == 1: # wait for a valid, new value
+    def _action_value_return(self, modname, methodname):
+        module = self._comm.regs
+        ack = getattr(module, f"{modname}_{methodname}_ack_csr")
+        value = getattr(module, f"{modname}_{methodname}_value_csr")
+        while ack.read() == 1: # wait for a valid, new value
             pass
-        v = dev.bsREPL_collatz_get_value_csr
-        dev.bsREPL_collatz_get_ack_csr = 1 # advance the FIFO
+        v = value.read()
+        ack.write(1) # advance the FIFO
         return v
 
     def status(self):
         dev = self._dev
         print(f"""
-        value in {dev.bsREPL_collatz_submit_value_csr}
-        trgger {dev.bsREPL_collatz_submit_trigger_csr}
-        fsm state {bin(dev.bsREPL_collatz_submit_status_csr)}
-        value out {dev.bsREPL_collatz_get_value_csr}
-        ack out {dev.bsREPL_collatz_get_ack_csr}
-        out status {bin(dev.bsREPL_collatz_get_status_csr)}""")
+        value in {self._comm.regs.bsREPL_collatz_submit_value_csr}
+        trgger {self._comm.regs.bsREPL_collatz_submit_trigger_csr}
+        fsm state {bin(self._comm.regs.bsREPL_collatz_submit_status_csr)}
+        value out {self._comm.regs.bsREPL_collatz_get_value_csr}
+        ack out {self._comm.regs.bsREPL_collatz_get_ack_csr}
+        out status {bin(self._comm.regs.bsREPL_collatz_get_status_csr)}""")
+
+    def get_csrs(self):
+        return list(self.csrs.values())
 
 
 if __name__ == "__main__":
-    from device import dev
-    collatz_repl = bsREPLinterface(dev)
+    from device import dev, comm
+    collatz_repl = bsREPL(comm)
 
     def bs_collatz(n):
-        collatz_repl.collatz_submit(n)
+        collatz_repl.collatz_submit(n=n)
         return collatz_repl.collatz_get()
 
     def collatz(n):
@@ -223,7 +253,7 @@ if __name__ == "__main__":
 
     def test_1(dev):
         dev.bsREPL_reset = 1
-        for n in range(5, 100):
+        for n in range(5, 10000):
             print(".", end="", flush=True)
             if bs_collatz(n) != collatz(n):
                 print(n)
@@ -232,39 +262,3 @@ if __name__ == "__main__":
     print(dev)
     test_1(dev)
     print("passed")
-
-# class bsREPLInterface():
-#
-#     def setUp(self):
-#         from device import dev
-#         self.dev = dev
-#
-#     def collatz_submit(self, n):
-#         while self.dev.collatz_submit_ready == 0:
-#             pass
-#
-#         self.dev.collatz_submit_n = n
-#
-#         self.dev.collatz_submit_enable_toggle = 1
-#         while self.dev.collatz_submit_ready == 0:
-#             pass
-#
-#         self.dev.collatz_submit_enable_toggle = 0
-#         while self.dev.collatz_submit_ready == 1:
-#             pass
-#         return
-#
-#     def collatz_get(self, n):
-#         while self.dev.collatz_submit_ready == 0:
-#             pass
-#
-#         self.dev.collatz_submit_n = n
-#
-#         self.dev.collatz_submit_enable_toggle = 1
-#         while self.dev.collatz_submit_ready == 0:
-#             pass
-#
-#         self.dev.collatz_submit_enable_toggle = 0
-#         while self.dev.collatz_submit_ready == 1:
-#             pass
-#         return
